@@ -10,27 +10,31 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 1 # 只拉取最新的一层代码，减小体积
+          fetch-depth: 1
 
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # 1. 删掉那些让 HF 崩溃的大文件
-          rm -rf docs/assets
+          # 1. 彻底删除 docs 文件夹（这里面全是图片，HF 不需要它）
+          # 同时删除其他可能存在的二进制资源夹
+          rm -rf docs
+          rm -rf tests  # 测试脚本通常也不需要推送到生产环境
           
-          # 2. 彻底抹除旧的 Git 历史记录（关键步骤！）
+          # 2. 彻底抹除旧的 Git 历史记录
           rm -rf .git
           
-          # 3. 重新初始化一个完全“干净”的仓库
+          # 3. 重新初始化一个完全干净的仓库
           git init
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # 4. 将所有代码添加并提交为一个全新的、唯一的 Commit
+          # 4. 确保我们在 main 分支
           git checkout -b main
-          git add .
-          git commit -m "Deploying clean version to Hugging Face"
           
-          # 5. 强制推送到 Hugging Face（就像新仓库一样）
+          # 5. 添加剩余的所有代码文件（现在只剩下 Python/JS 代码了）
+          git add .
+          git commit -m "Deploying core code only to Hugging Face"
+          
+          # 6. 强制推送到 Hugging Face
           git push -f https://tuimi:$HF_TOKEN@huggingface.co/spaces/tuimi/my_stock main
