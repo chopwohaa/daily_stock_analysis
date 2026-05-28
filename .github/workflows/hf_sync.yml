@@ -1,20 +1,21 @@
-name: Sync to Hugging Face Hub
+name: Sync to Hugging Face hub
+
 on:
   push:
-    branches: [main] # 只有当你代码合并到 main 分支时才触发
-  workflow_dispatch:  # 支持手动触发
+    branches: [main]
+  workflow_dispatch: # 允许手动触发
 
 jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          lfs: true
+          lfs: true # 如果你使用 Git-LFS，务必启用
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # 注意：这里的 tuimi 是你的 HF 用户名，my_stock 是你的 Space 名字
-          git push --force https://tuimi:$HF_TOKEN@huggingface.co/spaces/tuimi/my_stock main
+          git push https://tuimi:$HF_TOKEN@huggingface.co/spaces/tuimi/my_stock main
