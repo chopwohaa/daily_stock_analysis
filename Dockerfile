@@ -32,4 +32,4 @@ EXPOSE 7860
 # 注意：这里需要根据你项目的实际启动脚本修改。
 # 如果是启动 FastAPI: CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]
 # 如果是直接运行主脚本（如果是带 Web 界面的脚本）:
-CMD ["python", "main.py"]
+CMD ["streamlit", "run", "webui.py", "--server.port", "7860", "--server.address", "0.0.0.0"]
