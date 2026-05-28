@@ -34,4 +34,4 @@ EXPOSE 7860
 # 如果是直接运行主脚本（如果是带 Web 界面的脚本）:
 # 使用 python -m 调用，这样可以 100% 确保使用的是当前 Python 环境下的 streamlit
 # 关键点：通过环境变量覆盖代码中的默认值，确保后端和前端都统一到 7860
-CMD ["sh", "-c", "WEBUI_PORT=7860 streamlit run webui.py --server.port 7860 --server.address 0.0.0.0"]
+CMD ["sh", "-c", "WEBUI_HOST=0.0.0.0 WEBUI_PORT=7860 python webui.py"]
