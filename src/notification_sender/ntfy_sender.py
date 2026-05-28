@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from typing import Optional, Tuple
 from urllib.parse import unquote, urlparse, urlunparse
@@ -11,6 +12,7 @@ from urllib.parse import unquote, urlparse, urlunparse
 import requests
 
 from src.config import Config
+from src.formatters import chunk_content_by_max_bytes
 
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,28 @@ class NtfySender:
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
+        # ntfy.sh 限制整个请求体 ≤ 4096 字节；预留空间给 JSON 结构 / topic / title
+        _NTFY_MAX_BODY_BYTES = 4096
+        _NTFY_PAYLOAD_OVERHEAD = 600
+        budget = _NTFY_MAX_BODY_BYTES - _NTFY_PAYLOAD_OVERHEAD
+
+        content_bytes = len(content.encode("utf-8"))
+        if content_bytes > budget:
+            logger.info(
+                "ntfy 消息内容超长 (%d 字节/%d 字符)，将分批发送",
+                content_bytes,
+                len(content),
+            )
+            return self._send_ntfy_chunked(
+                content,
+                title=title,
+                topic=topic,
+                server_url=server_url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                budget=budget,
+            )
+
         payload = {
             "topic": topic,
             "title": title,
@@ -97,6 +121,61 @@ class NtfySender:
             "markdown": True,
         }
 
+        return self._post_ntfy(server_url, payload, headers, timeout_seconds)
+
+    # ------------------------------------------------------------------
+    # 分块发送（与项目其他 sender 保持一致）
+    # ------------------------------------------------------------------
+
+    def _send_ntfy_chunked(
+        self,
+        content: str,
+        *,
+        title: str,
+        topic: str,
+        server_url: str,
+        headers: dict,
+        timeout_seconds: Optional[float],
+        budget: int,
+    ) -> bool:
+        """Split long content into chunks and send each as a separate ntfy message."""
+        chunks = chunk_content_by_max_bytes(content, budget, add_page_marker=True)
+        total = len(chunks)
+        success_count = 0
+
+        logger.info("ntfy 分批发送：共 %d 批", total)
+
+        for i, chunk in enumerate(chunks):
+            chunk_title = f"{title} ({i + 1}/{total})" if total > 1 else title
+            payload = {
+                "topic": topic,
+                "title": chunk_title,
+                "message": chunk,
+                "markdown": True,
+            }
+            if self._post_ntfy(server_url, payload, headers, timeout_seconds):
+                success_count += 1
+                logger.info("ntfy 第 %d/%d 批发送成功", i + 1, total)
+            else:
+                logger.error("ntfy 第 %d/%d 批发送失败", i + 1, total)
+
+            if i < total - 1:
+                time.sleep(1)
+
+        return success_count == total
+
+    # ------------------------------------------------------------------
+    # 底层 POST 请求
+    # ------------------------------------------------------------------
+
+    def _post_ntfy(
+        self,
+        server_url: str,
+        payload: dict,
+        headers: dict,
+        timeout_seconds: Optional[float],
+    ) -> bool:
+        """Execute a single ntfy POST request."""
         try:
             response = requests.post(
                 server_url,
