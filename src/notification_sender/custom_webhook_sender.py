@@ -361,42 +361,43 @@ class CustomWebhookSender:
             return None
         return payload
     
-    def _send_dingtalk_chunked(self, url: str, content: str, max_bytes: int = 20000) -> bool:
-        import time as _time
-
-        # 为 payload 开销预留空间，避免 body 超限
-        budget = max(1000, max_bytes - 1500)
-        chunks = chunk_content_by_max_bytes(content, budget)
+    def _send_bark_chunked(self, url: str, content: str, max_bytes: int = 4000) -> bool:
+        budget = max(500, max_bytes - 500)
+        chunks = chunk_content_by_max_bytes(content, budget, add_page_marker=True)
+        chunks = [c for c in chunks if c.strip()]
         if not chunks:
             return False
-
+    
         total = len(chunks)
         ok = 0
-
-        for idx, chunk in enumerate(chunks):
-            marker = f"\n\n📄 *({idx+1}/{total})*" if total > 1 else ""
+    
+        # 逆序遍历：从最后一个 chunk 开始发送
+        reversed_chunks = list(reversed(chunks))
+        logger.info("Bark 逆序分批发送：共 %d 批", total)
+    
+        for idx, chunk in enumerate(reversed_chunks):
+            # 计算原始批次号（用于标题显示）
+            original_index = total - idx   # idx=0 对应最后一个 chunk -> 批次号 total
+            title_marker = f" ({original_index}/{total})" if total > 1 else ""
             payload = {
-                "msgtype": "markdown",
-                "markdown": {
-                    "title": "股票分析报告",
-                    "text": chunk + marker,
-                },
+                "title": f"股票分析报告{title_marker}",
+                "body": chunk,
+                "group": "stock",
             }
-
-            # 如果仍超限（极端情况下），再按字节硬截断一次
-            body_bytes = len(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+    
+            body_bytes = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
             if body_bytes > max_bytes:
                 hard_budget = max(200, budget - (body_bytes - max_bytes) - 200)
-                payload["markdown"]["text"], _ = slice_at_max_bytes(payload["markdown"]["text"], hard_budget)
-
+                payload["body"], _ = slice_at_max_bytes(payload["body"], hard_budget)
+    
             if self._post_custom_webhook(url, payload, timeout=30):
                 ok += 1
             else:
-                logger.error(f"钉钉分批发送失败: 第 {idx+1}/{total} 批")
-
+                logger.error("Bark 第 %d/%d 批发送失败", original_index, total)
+    
             if idx < total - 1:
-                _time.sleep(1)
-
+                time.sleep(1)
+    
         return ok == total
 
     
@@ -407,6 +408,7 @@ class CustomWebhookSender:
         chunks = chunk_content_by_max_bytes(content, budget, add_page_marker=True)
         if not chunks:
             return False
+        chunks = [c for c in chunks if c.strip()]
 
         total = len(chunks)
         ok = 0
