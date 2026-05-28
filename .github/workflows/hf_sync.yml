@@ -10,25 +10,27 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0
-      
-      - name: Clean up large files for HF
-        run: |
-          # 删掉让 Hugging Face 报错的大文件（仅在同步过程中删除）
-          rm -rf docs/assets/*.gif
-          rm -rf docs/assets/dsa_vi/*.psd
-          
-          # 配置临时身份进行本地提交
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          
-          # 提交删除操作，但不推回 GitHub，只为了推给 HF
-          git add .
-          git commit -m "Remove large files for Hugging Face sync" || echo "No changes to commit"
+          fetch-depth: 1 # 只拉取最新的一层代码，减小体积
 
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # 强制推送到 Hugging Face
+          # 1. 删掉那些让 HF 崩溃的大文件
+          rm -rf docs/assets
+          
+          # 2. 彻底抹除旧的 Git 历史记录（关键步骤！）
+          rm -rf .git
+          
+          # 3. 重新初始化一个完全“干净”的仓库
+          git init
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # 4. 将所有代码添加并提交为一个全新的、唯一的 Commit
+          git checkout -b main
+          git add .
+          git commit -m "Deploying clean version to Hugging Face"
+          
+          # 5. 强制推送到 Hugging Face（就像新仓库一样）
           git push -f https://tuimi:$HF_TOKEN@huggingface.co/spaces/tuimi/my_stock main
