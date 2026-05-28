@@ -86,6 +86,18 @@ class CustomWebhookSender:
                         logger.error(f"自定义 Webhook {i+1}（钉钉）推送失败")
                     continue
 
+                # Bark (iOS 推送) 对 body 有字节上限，超长需要分批发送
+                if self._is_bark_webhook(url):
+                    _BARK_MAX_BODY_BYTES = 4000
+                    content_bytes = len(content.encode("utf-8"))
+                    if content_bytes > _BARK_MAX_BODY_BYTES:
+                        if self._send_bark_chunked(url, content, max_bytes=_BARK_MAX_BODY_BYTES):
+                            logger.info(f"自定义 Webhook {i+1}（Bark 分批）推送成功")
+                            success_count += 1
+                        else:
+                            logger.error(f"自定义 Webhook {i+1}（Bark 分批）推送失败")
+                        continue
+
                 # 其他 Webhook：单次发送
                 payload = self._build_custom_webhook_payload(url, content)
                 if self._post_custom_webhook(url, payload, timeout=30):
@@ -305,9 +317,10 @@ class CustomWebhookSender:
         
         # Bark (iOS 推送)
         if 'api.day.app' in url_lower:
+            truncated_body, _ = slice_at_max_bytes(content, 3500)
             return {
                 "title": "股票分析报告",
-                "body": content[:4000],  # Bark 限制
+                "body": truncated_body,
                 "group": "stock"
             }
         
@@ -387,6 +400,48 @@ class CustomWebhookSender:
         return ok == total
 
     
+    def _send_bark_chunked(self, url: str, content: str, max_bytes: int = 4000) -> bool:
+        """分批发送长 Bark 消息，与钉钉分批发送逻辑保持一致。"""
+        # 为 payload 开销预留空间（title / group / JSON 结构）
+        budget = max(500, max_bytes - 500)
+        chunks = chunk_content_by_max_bytes(content, budget, add_page_marker=True)
+        if not chunks:
+            return False
+
+        total = len(chunks)
+        ok = 0
+
+        logger.info("Bark 分批发送：共 %d 批", total)
+
+        for idx, chunk in enumerate(chunks):
+            title_marker = f" ({idx + 1}/{total})" if total > 1 else ""
+            payload = {
+                "title": f"股票分析报告{title_marker}",
+                "body": chunk,
+                "group": "stock",
+            }
+
+            # 极端情况下再按字节硬截断一次
+            body_bytes = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            if body_bytes > max_bytes:
+                hard_budget = max(200, budget - (body_bytes - max_bytes) - 200)
+                payload["body"], _ = slice_at_max_bytes(payload["body"], hard_budget)
+
+            if self._post_custom_webhook(url, payload, timeout=30):
+                ok += 1
+                logger.info("Bark 第 %d/%d 批发送成功", idx + 1, total)
+            else:
+                logger.error("Bark 第 %d/%d 批发送失败", idx + 1, total)
+
+            if idx < total - 1:
+                time.sleep(1)
+
+        return ok == total
+
+    @staticmethod
+    def _is_bark_webhook(url: str) -> bool:
+        return 'api.day.app' in (url or '').lower()
+
     @staticmethod
     def _is_dingtalk_webhook(url: str) -> bool:
         url_lower = (url or "").lower()
